@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>SRFI 247: Syntactic Monads</title>
+    <link href="/favicon.png" rel="icon" sizes="192x192" type="image/png">
+    <link rel="stylesheet" href="https://srfi.schemers.org/srfi.css" type="text/css">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+      body
+      {
+	  counter-reset: section;
+	  font-family: serif;
+      }
+      h2
+      {
+	  counter-reset: subsection;
+      }
+      h2:not(#issues)::before
+      {
+	  counter-increment: section;
+	  content: counter(section) " ";
+      }
+      h3
+      {
+	  counter-reset: subsubsection;
+      }
+      h3::before
+      {
+	  counter-increment: subsection;
+	  content: counter(section) "." counter(subsection) " ";
+      }
+      h4::before
+      {
+	  counter-increment: subsubsection;
+	  content: counter(section) "." counter(subsection) "." counter(subsubsection) " ";
+      }
+      span.token
+      {
+          font-family: serif;
+      }
+      span.token::before
+      {
+          content: "⟨";
+      }
+      span.token::after
+      {
+          content: "⟩";
+      }
+      dl.entries dt
+      {
+	  background-color: lightgrey;
+      }
+      dl.entries dd
+      {
+	  margin-left: 0;
+      }
+      dl.entries > dt.condition-type::after
+      {
+	  float: right;
+	  content: "condition type"
+      }
+      dl.entries > dt.procedure::after
+      {
+	  float: right;
+	  content: "procedure"
+      }
+      dl.entries > dt.syntax::after
+      {
+	  float: right;
+	  content: "syntax"
+      }
+      dt.entry > span.type
+      {
+	  float: right;
+      }
+      pre, code
+      {
+	  font-size: smaller;
+      }
+      pre.example
+      {
+	  margin-left: 1em;
+	  margin-right: 1em;
+      }
+      pre.example > span.result
+      {
+	  float: right;
+      }
+      pre.example > span.result::before
+      {
+	  padding-left: 1em;
+	  padding-right: 1em;
+	  content: "⟹"
+      }
+      sup
+      {
+	  display: inline-block;
+      }
+    </style>
+  </head>
+  <body>
+    <h1><a href="https://srfi.schemers.org/"><img class="srfi-logo"
+    src="https://srfi.schemers.org/srfi-logo.svg" alt="SRFI surfboard
+    logo" /></a>247: Syntactic Monads</h1>
+
+    <p>by Marc Nieper-Wißkirchen</p>
+
+    <h2 id="status">Status</h2>
+
+    <p style="color: red;">For editor's use only.  Please do not edit
+    this section.</p>
+
+    <p>??? the draft/final/withdrawn status of the SRFI, information
+      on how to subscribe to its mailing list, and important dates in
+      its history.  The editor will add this section.</p>
+
+    <h2 id="abstract">Abstract</h2>
+
+    <p>This SRFI extends Scheme with a simple mechanism to implicitly add
+      formal arguments to procedure definitions and to implicitly add
+      arguments to procedure calls.  Contrary to parameters (also known as fluids
+      or dynamically bound variables), which can be used for the same
+      purpose, no runtime overhead is generated.</p>
+
+    <h2 id="rationale">Rationale</h2>
+
+    <p>Thanks to its proper tail calls, Scheme is an excellent
+      programming language for describing state machines.  In a finite
+      state machine, each state is modelled by a procedure and each
+      state transition by a tail call to one of these procedures.  In
+      more general state machines, states are parameterized by values
+      of a list of state variables.  Each procedure accepts the
+      current values of the state variables as arguments and each tail
+      call is done with possibly updated values of the state variables.</p>
+
+    <p>Consider the following example of an interpreter for a simple
+      programming language dealing with three stacks:</p>
+
+    <pre class=example>(define run
+  (lambda (prog a b c)
+    (define a->b
+      (lambda (prog a b c)
+        (run prog (cdr a) (cons (car a) b) c)))
+    (define a->c
+      (lambda (prog a b c)
+        (run prog (cdr a) b (cons (car a) c))))
+    (define b->a
+      (lambda (prog a b c)
+        (run prog (cons (car b) a) (cdr b) c)))
+    (define b->c
+      (lambda (prog a b c)
+        (run prog a (cdr b) (cons (car b) c))))
+    (define c->a
+      (lambda (prog a b c)
+        (run prog (cons (car c) a) b (cdr c))))
+    (define c->b
+      (lambda (prog a b c)
+        (run prog a (cons (car c) b) (cdr c))))
+    (if (null? prog)
+        (values a b c)
+        (let ([ins (car prog)] [prog (cdr prog)])
+          (case ins
+            [(a->b) (a->b prog a b c)]
+            [(a->c) (a->c prog a b c)]
+            [(b->a) (b->a prog a b c)]
+            [(b->c) (b->c prog a b c)]
+            [(c->a) (c->a prog a b c)]
+            [(c->b) (c->b prog a b c)])))))</pre>
+
+    <p>In this example, the state variables
+      are <code><var>prog</var></code>, <code><var>a</var></code>, <code><var>b</var></code>,
+      and <code><var>c</var></code>, which are threaded through the
+      code.  While the semantics of the code are very clear,
+      syntactically it exhibits two problems: Firstly, it doesn't
+      scale when we extend the interpreter with more registers, that
+      is state variables because we have to change every procedure
+      definition and every procedure call.  Secondly, at each
+      transition step only a subset of the state variables are
+      updated, yet we have to list all state variables at each procedure call.</p>
+
+    <p>Using the mechanism provided by this SRFI, we can rewrite the
+      interpreter with the following code, which does not exhibit the
+      two problems.  At runtime, the code behaves exactly as the
+      previous code.</p>
+
+    <pre class=example>(define-syntactic-monad $ prog a b c)
+(define run
+  ($ lambda ()
+    ($ define (a->b)
+      ($ run ([a (cdr a)] [b (cons (car a) b)])))
+    ($ define (a->c)
+      ($ run ([a (cdr a)] [c (cons (car a) c)])))
+    ($ define (b->a)
+      ($ run ([a (cons (car b) a)] [b (cdr b)])))
+    ($ define (b->c)
+      ($ run ([b (cdr b)] [c (cons (car b) c)])))
+    ($ define (c->a)
+      ($ run ([a (cons (car c) a)] [c (cdr c)])))
+    ($ define (c->b)
+      ($ run ([b (cons (car c) b)] [c (cdr c)])))
+    (if (null? prog)
+        (values a b c)
+        (let ([ins (car prog)] [prog (cdr prog)])
+          (case ins
+            [(a->b) ($ a->b)]
+            [(a->c) ($ a->c)]
+            [(b->a) ($ b->a)]
+            [(b->c) ($ b->c)]
+            [(c->a) ($ c->a)]
+            [(c->b) ($ c->b)])))))</pre>
+
+    <p>Iterative and recursive loops are a particular case of state
+    machines, which can also benefit from defining a syntactic monad.
+    As examples, we give an implementation of the <code>partition</code> procedure found in SRFI 1 and R<sup>6</sup>RS and of the <code>factor</code> procedure found in Kent Dybvigs <i>The Scheme Programming Language</i>.</p>
+
+    <pre class=example>(define partition
+  (lambda (pred ls)
+    (define-syntactic-monad $ in out)
+    (let f ([ls ls])
+      (if (null? ls)
+          ($ values ([in '()] [out '()]))
+          ($ let*-values ([() (f (cdr ls))])
+            (let ([x (car ls)])
+              (if (pred x)
+                  ($ values ([in (cons x in)]))
+                  ($ values ([out (cons x out)])))))))))
+
+(partition symbol? '(one 2 3 four five 6)) ; => (one four five) (2 3 6)</pre>
+
+    <pre class=example>(define factor
+  (lambda (n)
+    (define-syntactic-monad $ n i)
+    ($ let f ([i 2])
+      (cond
+        [(>= i n) (list n)]
+        [(integer? (/ n i))
+         (cons i ($ f [(n (/ n i))]))]
+        [else ($ f [(i (+ i 1))])]))))
+
+(factor 3628800) ; => (2 2 2 2 2 2 2 2 3 3 3 3 5 5 7)</pre>
+
+    <h2 id="specification">Specification</h2>
+
+    <p>The following definition is exported by the <code>(srfi
+        :247)</code> and <code>(srfi :247 syntactic-monads)</code>
+        libraries.</p>
+
+    <dl class=entries>
+      <dt class=syntax><code>(define-syntactic-monad <span class=token>syntactic
+          monad name</span>
+          <span class=token>formal</span> <span class=ellipsis>&hellip;</span>)</code></dt>
+      <dd>
+        <p>The <code>define-syntactic-monad</code> form defines a
+          syntactic monad.</p>
+
+        <p>A <code>define-syntactic-monad</code> form is a definition and
+          can appear anywhere any
+          other <code><span class=token>definition</span></code> can
+          appear.</p>
+
+        <p>
+          <code><span class=token>Syntactic monad name</span></code> and
+          the <code><span class=token>formals</span></code> must all be
+          identifiers.
+        </p>
+
+        <p><code><span class=token>Syntactic monad name</span></code> is
+          bound as a syntactic keyword.
+          The <code><span class=token>formals</span></code>, taken as
+          symbols, become the <dfn>state variable names</dfn> of the
+          syntactic monad defined.  At use sites
+          of <code><span class=token>syntactic monad name</span></code>,
+          each state variable name defines a corresponding <dfn>state
+            variable</dfn>, which is an implicit identifier with the state
+          variable name as its symbolic name and which contains the same
+          contextual information as the
+          keyword <code><span class=token>syntactic monad
+              name</span></code> in the macro use.  An identifier is
+          the <dfn>same</dfn> as a state variable if binding the
+          identifier would shadow free references to the state variable.
+          The list of state variables (in the order of the state variable
+          names) at use sites of <code><span class=token>syntactic monad
+              name</span></code> is denoted by <code><span class=token>state
+              variable</span> <span class=ellipsis>&hellip;</span></code>.
+        </p>
+
+        <div class="small">
+          <p>Example:</p>
+          <pre class=example>(define-syntactic-monad $ a b)</pre>
+        </div>
+
+        <p>The keyword <code><span class="token">syntactic monad
+              name</span></code> defined by the <code>define-syntactic-monad</code> definition can be used in
+          the following ways (every other use is a syntax violation):</p>
+
+        <ul><li>
+            <p><code>(<span class="token">syntactic monad
+                  name</span> lambda <span class=token>formals</span>
+                <span class=token>body</span>)</code> is equivalent
+              to <code>(lambda
+                (<span class=token>state
+                  variable</span> <span class=ellipsis>&hellip;</span>
+                . <span class=token>formals</span>) <span class=token>body</span>)</code>.</p>
+
+            <div class="small">
+              <p>Example:</p>
+              <pre class=example>(($ lambda (c) (list a b c)) 1 2 3) ; => (1 2 3)</pre>
+            </div>
+          </li>
+          <li>
+            <p><code>(<span class="token">syntactic monad name</span> define
+                (<span class=token>name</span>
+                . <span class=token>formals</span>) <span class=token>body</span>)</code>
+              is equivalent to <code>(define <span class=token>name</span>
+                (<span class=token>syntactic monad
+                  name</span> lambda <span class=token>formals</span> <span class=token>body</span>)</code>.</p>
+
+            <div class="small">
+              <p>Example:</p>
+              <pre class=example>($ define (f c d) (list a b c d))
+(f 1 2 3 4) ; => (1 2 3 4)</pre>
+            </div>
+          </li>
+          <li>
+            <p><code>(<span class="token">syntactic monad name</span>
+                case-lambda
+                [<span class="token">formals</span> <span class="token">body</span>] <span class=ellipsis>&hellip;</span>)</code>
+              is equivalent to <code>(case-lambda [(<span class=token>state
+                  variable</span> <span class=ellipsis>&hellip;</span>
+                . <span class="token">formals</span>) <span class="token">body</span>] <span class=ellipsis>&hellip;</span>)</code></p>
+
+            <div class="small">
+              <p>Example:</p>
+              <pre class=example>(($ case-lambda [() (list a b)]) 1 2) ; => (1 2)</pre>
+            </div>
+          </li>
+          <li>
+            <p><code>(<span class="token">syntactic monad name</span> let*-values
+                ([<span class="token">formals</span> <span class=token>init</span>] <span class=ellipsis>&hellip;</span>) <span class="token">body</span>)</code>
+              is equivalent to <code>(let*-values ([(<span class=token>state
+                  variable</span> <span class=ellipsis>&hellip;</span>
+                . <span class="token">formals</span>) <span class=token>init</span>] <span class=ellipsis>&hellip;</span>) <span class="token">body</span>)</code></p>
+
+            <div class="small">
+              <p>Example:</p>
+              <pre class=example>($ let*-values ([(c) (values 1 2 3)]
+                [() (values a (+ b c))])
+  (list a b)) ; => (1 5)</pre>
+            </div>
+          </li>
+          <li>
+            <p><code>(<span class="token">syntactic monad
+                  name</span> <span class=token>procedure expression</span>
+                (<span class=token>binding</span>
+                <span class=ellipsis>&hellip;</span>) <span class=token>argument
+                  expression</span> <span class=ellipsis>&hellip;</span>)</code>
+              is equivalent to a procedure call of the
+              form <code>(<span class=token>procedure expression</span>
+                <span class=token>state variable
+                  expression</span> <span class=ellipsis>&hellip;</span> <span class=token>argument
+                  expression</span>
+                <span class=ellipsis>&hellip;</span>)</code>.  Here,
+              each <code><span class=token>binding</span></code> is of the
+              form <code>[<span class=token>variable</span> <span class=token>expression</span>]</code>
+              where each <code><span class=token>variable</span></code> must
+              be the same as one of the state variables.  It is also a syntax
+              violation if one of the <code><span class=token>variables</span></code>
+              appears more than once amongst
+              the <code><span class=token>variables</span></code>.
+              The <code><span class="token">state variable
+                  expressions</span></code> are a list of expressions
+              corresponding to the state variables.  For
+              each <code><span class="token">variable</span></code>, which is
+              a state variable, the
+              corresponding <code><span class="token">state variable
+                  expression</span></code> is
+              the <code><span class="token">expression</span></code>
+              corresponding to
+              the <code><span class="token">variable</span></code>.  For the
+              state variables that do not appear amongst
+              the <code><span class="token">variables</span></code>, the
+              corresponding <code><span class="token">state variable
+                  expression</span></code> is a variable reference to the same
+              state variable.</p>
+
+            <div class="small"><p>Example:</p>
+              <pre class=example>(let ([a 1])
+  ($ list ([b 2]) 4)) ; => (1 2 4)</pre>
+            </div>
+          </li>
+          <li>
+            <p><code>(<span class="token">syntactic monad
+                  name</span> <span class=token>procedure expression</span>)</code>
+              is equivalent to
+              <code>(<span class=token>syntactic monad
+                  name</span> <span class=token>procedure expression</span>
+                ())</code>.</p>
+
+            <div class="small"><p>Example:</p>
+              <pre class=example>(let ([a 1] [b 6])
+  ($ list)) ; => (1 6)</pre>
+            </div>
+          </li>
+          <li>
+            <p><code>(<span class="token">syntactic monad name</span>
+                let <span class="token">loop variable</span>
+                ([<span class=token>variable</span> <span class=token>init</span>] <span class=ellipsis>&hellip;</span>) <span class=token>body</span>)</code>
+              is equivalent to
+              <code>(let <span class="token">loop variable</span> ([<span class="token">state variable</span> <span class="token">state variable init</span>]
+                <span class="ellipsis">&hellip;</span> [<span class="token">other variable</span> <span class="token">other variable init</span>] <span class="ellipsis">&hellip;</span>)
+                <span class="token">body</span>)</code>.  Here, for
+              each <code><span class="token">state variable</span></code>
+              appearing among
+              the <code><span class="token">variables</span></code>, the
+              corresponding <code><span class="token">state variable
+                  init</span></code> is the
+              corresponding <code><span class="token">variable
+                  init</span></code>. For each <code><span class="token">state
+                  variable</span></code> not appearing among
+              the <code><span class="token">variables</span></code>, the
+              corresponding <code><span class="token">state variable
+                  init</span></code> is a variable reference to the same state
+              variable.  The <code><span class="token">other
+                  variables</span></code> are
+              the <code><span class="token">variables</span></code> that are
+              not state variables in that order.
+              The <code><span class="token">other inits</span></code> are the
+              corresponding <code><span class="token">inits</span></code>.</p>
+            <div class="small"><p>Example:</p>
+              <pre class=example>(let ([a 1])
+  ($ let loop ([c 3] [b 2])
+    (if (= a 2)
+      (list a b c)
+      (loop 2 (+ b 6) (+ c 7))))) ; => (2 8 10)</pre>
+            </div>
+          </li>
+        </ul>
+        <p><i>Note:</i> In <code>(define-syntactic-monad <span class=token>syntactic-monad-name</span> <span class=token>formal</span> <span class=ellipsis>&hellip;</span>)</code>,
+          only the names of
+          the <code><span class=token>formals</span></code> are
+          significant.
+        </p>
+      </dd>
+    </dl>
+
+    <h2 id="implementation">Implementation</h2>
+
+    <p>The sample implementation is written in portable
+      R<sup>6</sup>RS scheme.  It can easily be ported to other Scheme
+      systems supporting the <code>syntax-case</code> system.</p>
+
+    <a href="lib/srfi/:247/syntactic-monads.sls">Source for the sample
+    implementation.</a>
+
+    <h2 id="acknowledgements">Acknowledgements</h2>
+
+    <p>This SRFI was inspired from and would not exist without the
+      prior appearance of a form
+      of <code>define-syntactic-monad</code> in the source code of
+      Chez Scheme.</p>
+
+    <h2 id="copyright">Copyright</h2>
+    <p>&copy; 2023 Marc Nieper-Wißkirchen.</p>
+
+    <p>
+      Permission is hereby granted, free of charge, to any person
+      obtaining a copy of this software and associated documentation
+      files (the "Software"), to deal in the Software without
+      restriction, including without limitation the rights to use,
+      copy, modify, merge, publish, distribute, sublicense, and/or
+      sell copies of the Software, and to permit persons to whom the
+      Software is furnished to do so, subject to the following
+      conditions:</p>
+
+    <p>
+      The above copyright notice and this permission notice (including
+      the next paragraph) shall be included in all copies or
+      substantial portions of the Software.</p>
+    <p>
+      THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+      EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
+      OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+      NONINFRINGEMENT.  IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+      HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+      WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+      FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+      OTHER DEALINGS IN THE SOFTWARE.</p>
+
+    <hr>
+    <address>Editor: <a href="mailto:srfi-editors+at+srfi+dot+schemers+dot+org">Arthur
+    A. Gleckler</a></address></body></html>
