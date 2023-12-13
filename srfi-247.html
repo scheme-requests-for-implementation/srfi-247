@@ -49,7 +49,7 @@
       }
       dl.entries dt
       {
-	  background-color: lightgrey;
+	  background-color: #eee;
       }
       dl.entries dd
       {
@@ -182,7 +182,9 @@
     <p>Using the mechanism provided by this SRFI, we can rewrite the
       interpreter with the following code, which does not exhibit the
       two problems.  At runtime, the code behaves exactly as the
-      previous code.</p>
+      previous code.  By convention, the names for syntactic monads
+      begin with the character <code>$</code>.  (Locally defined
+      syntactic monads are often just named <code>$</code>.)</p>
 
     <pre class=example>(define-syntactic-monad $ prog a b c)
 (define run
