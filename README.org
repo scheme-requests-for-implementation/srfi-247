@@ -1,4 +1,6 @@
 
+# SPDX-FileCopyrightText: 2023 Marc Nieper-Wißkirchen
+# SPDX-License-Identifier: MIT
 * SRFI 247: Syntactic Monads
 
 ** by Marc Nieper-Wißkirchen

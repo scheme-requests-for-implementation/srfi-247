@@ -1,6 +1,8 @@
 #!r6rs
 
 ;; Copyright (C) Marc Nieper-Wißkirchen (2023).  All Rights Reserved.
+;;
+;; SPDX-License-Identifier: MIT
 
 ;; Permission is hereby granted, free of charge, to any person
 ;; obtaining a copy of this software and associated documentation
