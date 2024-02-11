@@ -118,7 +118,11 @@ SPDX-License-Identifier: MIT
       <li>Draft #1 published: 2023-10-12</li>
       <li>Draft #2 published: 2023-12-13</li>
       <li>Finalized: 2023-12-24</li>
-    </ul>
+      <li>Revised to fix errata:
+        <ul>
+          <li>2024-02-11 (Fixed error (wrong meta-variable name) in
+            description of <a href="#let-loop">let loops</a>
+            in <code>define-syntactic-monad</code>.)</li></ul></li></ul>
 
     <h2 id="abstract">Abstract</h2>
 
@@ -409,7 +413,7 @@ SPDX-License-Identifier: MIT
   ($ list)) ; => (1 6)</pre>
             </div>
           </li>
-          <li>
+          <li id="let-loop">
             <p><code>(<span class="token">syntactic monad name</span>
                 let <span class="token">loop variable</span>
                 ([<span class=token>variable</span> <span class=token>init</span>] <span class=ellipsis>&hellip;</span>) <span class=token>body</span>)</code>
@@ -422,8 +426,7 @@ SPDX-License-Identifier: MIT
               the <code><span class="token">variables</span></code>, the
               corresponding <code><span class="token">state variable
                   init</span></code> is the
-              corresponding <code><span class="token">variable
-                  init</span></code>. For each <code><span class="token">state
+              corresponding <code><span class="token">init</span></code>. For each <code><span class="token">state
                   variable</span></code> not appearing among
               the <code><span class="token">variables</span></code>, the
               corresponding <code><span class="token">state variable
